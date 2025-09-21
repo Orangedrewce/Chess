@@ -1,33 +1,33 @@
-# Node
-node_modules/
+# Logs
+logs
+*.log
 npm-debug.log*
-package-lock.json
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Vite / build outputs
+# Dependency directories
+node_modules/
+
+# Optional caches
+.eslintcache
+.cache/
 dist/
-.vite/
 
-# OS
+# Vite / build cache
+*.local
+
+# Editor / OS
 .DS_Store
 Thumbs.db
-
-# Logs
-logs/
-*.log
-
-# Env
-.env
-
-# Editor
-.vscode/
 .idea/
-
-# Public binaries / large WASM assets kept in public/ but exclude built node_modules copies
-public/stockfish/stockfish.wasm
-public/stockfish/stockfish.wasm.js
-
-# Tests
-coverage/
-
-# Misc
 *.swp
+*.swo
+*.vs*
+
+# Env files
+.env.local
+.env.*.local
+
+# Keep build output in docs for GitHub Pages
+!docs/

@@ -748,13 +748,21 @@ function renderBoard() {
             if (piece) {
                 const pieceSpan = document.createElement('span');
                 pieceSpan.className = `piece ${piece.color === 'w' ? 'white' : 'black'}`;
-                pieceSpan.textContent = getPieceSymbol(piece);
+                const sym = getPieceSymbol(piece);
+                pieceSpan.textContent = sym;
+                pieceSpan.dataset.symbol = sym; // store for recovery if DOM text lost
                 
                 if (gameState.isStarted && !gameState.isGameOver && piece.color === gameState.settings.playerColor) {
                     pieceSpan.draggable = true;
                     pieceSpan.addEventListener('dragstart', handleDragStart);
                 }
                 squareDiv.appendChild(pieceSpan);
+                // Defensive: if glyph fails to render (e.g., font load race) schedule a microtask to re-set
+                queueMicrotask(() => {
+                    if (pieceSpan && !pieceSpan.textContent) {
+                        pieceSpan.textContent = pieceSpan.dataset.symbol || sym;
+                    }
+                });
 
                 if (isCheck && piece.type === 'k' && piece.color === chess.turn()) {
                     squareDiv.classList.add('in-check');
@@ -1024,8 +1032,9 @@ function highlightMoves(square) {
 }
 
 function getPieceSymbol(piece) {
-    const symbols = { 'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚' };
-    return symbols[piece.type.toLowerCase()];
+    if (!piece || !piece.type) return '?';
+    const symbols = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
+    return symbols[piece.type.toLowerCase()] || '?';
 }
 
 function renderPremoveUI(premove) {
@@ -1317,3 +1326,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 50);
 });
+
+// -------------------------------------------------------------
+// PIECE GLYPH INTEGRITY WATCHDOG (handles rare font/glyph drops)
+// -------------------------------------------------------------
+function restoreMissingPieceGlyphs() {
+    const pieces = document.querySelectorAll('.piece');
+    let repaired = 0;
+    pieces.forEach(p => {
+        if ((!p.textContent || p.textContent.trim() === '') && p.dataset.symbol) {
+            p.textContent = p.dataset.symbol;
+            repaired++;
+        }
+    });
+    if (repaired) {
+        try { logger.warn(`[INTEGRITY] Restored ${repaired} missing piece glyph${repaired===1?'':'s'}.`); } catch(_) {}
+    }
+}
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden) restoreMissingPieceGlyphs(); });
+setInterval(restoreMissingPieceGlyphs, 7000);

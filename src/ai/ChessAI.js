@@ -6,8 +6,45 @@ import logger from '../utils/logger.js';
  * This class handles UCI communication and provides a simple getMove() method.
  */
 export class ChessAI {
-    constructor(enginePath = '/stockfish/stockfish.js', timeout = 5000) {
-        this.engine = new Worker(enginePath);
+    constructor(enginePath, timeout = 5000) {
+        // Determine correct base for assets when deployed under GitHub Pages (e.g. /Chess/)
+        // Priority:
+        // 1. Explicit enginePath passed by caller
+        // 2. import.meta.env.BASE_URL (Vite injects this, will be '/Chess/' in production build)
+        // 3. Derive from current location pathname (take first segment) as fallback
+        let base = '';
+        if (typeof enginePath === 'string' && enginePath.trim().length > 0) {
+            base = enginePath;
+        } else {
+            // Try to use Vite's injected BASE_URL if available
+            try {
+                if (import.meta && import.meta.env && import.meta.env.BASE_URL) {
+                    base = import.meta.env.BASE_URL.replace(/\\+/g, '/');
+                    if (!base.endsWith('/')) base += '/';
+                    base += 'stockfish/stockfish.js';
+                }
+            } catch (_) {
+                // ignore
+            }
+            // Fallback: derive from first path segment (GitHub Pages repo name)
+            if (!base) {
+                try {
+                    const pathParts = (window.location.pathname || '/').split('/').filter(Boolean);
+                    if (pathParts.length > 0) {
+                        base = '/' + pathParts[0] + '/stockfish/stockfish.js';
+                    } else {
+                        base = '/stockfish/stockfish.js';
+                    }
+                } catch (_) {
+                    base = '/stockfish/stockfish.js';
+                }
+            }
+        }
+
+        // If caller passed a directory instead of full file, append file
+        if (base.endsWith('/')) base += 'stockfish/stockfish.js';
+
+        this.engine = new Worker(base);
         this.moveResolver = null; // A function to resolve the promise in getMove
 
         // Promise-based readiness with a timeout

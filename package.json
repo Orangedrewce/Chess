@@ -1,0 +1,25 @@
+{
+  "name": "chess-game",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "vite": "^7.1.6"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "http-server": "^14.1.1",
+    "stockfish": "^17.1.0"
+  }
+}

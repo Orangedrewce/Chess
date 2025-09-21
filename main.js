@@ -178,7 +178,8 @@ function setupNewGame() {
             // Lazy init engine
             if (!gameState.ai.engine) {
                 try {
-                    gameState.ai.engine = new ChessAI('/stockfish/stockfish.js');
+                    // Let ChessAI determine correct path (GitHub Pages base aware)
+                    gameState.ai.engine = new ChessAI();
                     logger.info('[AI] Stockfish engine worker initializing...');
                     gameState.ai.engine.readyPromise.then(() => {
                         logger.info('[AI] Stockfish engine is ready.');
@@ -622,7 +623,8 @@ async function makeAIMove() {
         // Ensure engine exists
         if (!gameState.ai.engine) {
             try {
-                gameState.ai.engine = new ChessAI('/stockfish/stockfish.js');
+                // Create engine using internal dynamic resolution
+                gameState.ai.engine = new ChessAI();
                 await gameState.ai.engine.readyPromise;
             } catch (e) {
                 logger.error('[AI] Engine missing & init failed; fallback random this turn', e);

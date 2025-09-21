@@ -7,44 +7,27 @@ import logger from '../utils/logger.js';
  */
 export class ChessAI {
     constructor(enginePath, timeout = 5000) {
-        // Determine correct base for assets when deployed under GitHub Pages (e.g. /Chess/)
-        // Priority:
-        // 1. Explicit enginePath passed by caller
-        // 2. import.meta.env.BASE_URL (Vite injects this, will be '/Chess/' in production build)
-        // 3. Derive from current location pathname (take first segment) as fallback
-        let base = '';
-        if (typeof enginePath === 'string' && enginePath.trim().length > 0) {
-            base = enginePath;
+        // Preferred modern pattern: let bundler (Vite) resolve worker URL relative to this module.
+        // If a custom enginePath is provided, use it; otherwise build a URL relative to BASE_URL/public.
+        let workerUrl;
+        if (enginePath) {
+            workerUrl = enginePath;
         } else {
-            // Try to use Vite's injected BASE_URL if available
-            try {
-                if (import.meta && import.meta.env && import.meta.env.BASE_URL) {
-                    base = import.meta.env.BASE_URL.replace(/\\+/g, '/');
-                    if (!base.endsWith('/')) base += '/';
-                    base += 'stockfish/stockfish.js';
-                }
-            } catch (_) {
-                // ignore
-            }
-            // Fallback: derive from first path segment (GitHub Pages repo name)
-            if (!base) {
-                try {
-                    const pathParts = (window.location.pathname || '/').split('/').filter(Boolean);
-                    if (pathParts.length > 0) {
-                        base = '/' + pathParts[0] + '/stockfish/stockfish.js';
-                    } else {
-                        base = '/stockfish/stockfish.js';
-                    }
-                } catch (_) {
-                    base = '/stockfish/stockfish.js';
-                }
-            }
+            // Use public folder asset path. In Vite, anything under public/ is served at root (respecting base at deploy)
+            // We rely on base being set to '/Chess/' in production so '/Chess/stockfish/stockfish.js' is correct.
+            let base = '/';
+            try { if (import.meta?.env?.BASE_URL) base = import.meta.env.BASE_URL; } catch (_) {}
+            if (!base.endsWith('/')) base += '/';
+            workerUrl = base + 'stockfish/stockfish.js';
         }
 
-        // If caller passed a directory instead of full file, append file
-        if (base.endsWith('/')) base += 'stockfish/stockfish.js';
-
-        this.engine = new Worker(base);
+        try {
+            // Attempt module worker first (some builds of stockfish are classic scripts; if fails, fallback below)
+            this.engine = new Worker(workerUrl, { type: 'classic' });
+        } catch (e) {
+            logger.warn('[AI] Primary worker creation failed, retrying classic mode only', e);
+            this.engine = new Worker(workerUrl);
+        }
         this.moveResolver = null; // A function to resolve the promise in getMove
 
         // Promise-based readiness with a timeout

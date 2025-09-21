@@ -592,7 +592,8 @@ async function makeAIMove() {
         const isAITurn = chess.turn() !== gameState.settings.playerColor;
         if (!isAITurn) return; // guard
 
-        gameState.ai.isThinking = true;
+    gameState.ai.isThinking = true;
+    updateStatus();
         const personality = gameState.ai.personality || getPersonality(gameState.settings.opponent);
         const level = personality.id;
         logger.info('[AI] Thinking start', { turn: chess.turn(), fen: chess.fen(), personality });
@@ -695,6 +696,7 @@ async function makeAIMove() {
         gameState.ai.isThinking = false;
         gameState.ai.timeoutId = null; // legacy compatibility
         renderBoard();
+        updateClockDisplay();
         updateStatus();
         attemptPremoveExecution();
     }
@@ -797,9 +799,12 @@ function updateStatus() {
         status = 'Draw!';
         gameState.isGameOver = true;
     } else {
-        status = `${turn} to move`;
-        if (chess.inCheck()) {
-            status += ' - Check!';
+        const isAITurn = gameState.settings.opponent !== 'human' && chess.turn() !== gameState.settings.playerColor;
+        if (isAITurn && gameState.ai.isThinking) {
+            status = 'Thinking…';
+        } else {
+            status = `${turn} to move`;
+            if (chess.inCheck()) status += ' - Check!';
         }
     }
     
@@ -813,6 +818,7 @@ function updateStatus() {
     uiElements.statusText.className = 'status-text'; // Reset classes
     if (gameState.isGameOver) uiElements.statusText.classList.add('game-over');
     if (status.includes('Check')) uiElements.statusText.classList.add('check');
+    if (status.startsWith('Thinking')) uiElements.statusText.classList.add('thinking');
 
     logger.info('Status', status);
 }

@@ -47,37 +47,3 @@ Or use the convenience script:
 npm run deploy
 ```
 (Will create a commit if there are changes in `docs/`.)
-
-## GitHub Pages Configuration
-`vite.config.js` uses `base: '/Chess/'`. If you rename the repo, update that base to match new `/<RepoName>/` or set it to `/` if using a custom domain.
-
-## Project Structure
-```
-├─ index.html              # App entry
-├─ main.js                 # Main UI + game logic
-├─ src/ai/ChessAI.js       # Stockfish wrapper & time mgmt
-├─ src/utils/logger.js     # Central logger
-├─ assets/styles/          # CSS
-├─ public/stockfish/       # Engine binaries (copied to build)
-├─ docs/                   # Production build output
-```
-
-## AI Personalities
-Defined in `main.js` (`AI_PERSONALITIES`). Personalities vary depth, time slice, blunder chance, and thinking delay. The engine falls back to random if initialization fails.
-
-## Future Ideas
-- PGN download & analysis panel
-- Opening explorer / book moves
-- Engine multi-PV display
-- Unit tests for time management heuristics
-- Dark mode / themes
-
-## Contributing
-Fork or clone locally. Please format code consistently; consider adding ESLint/Prettier in a future enhancement.
-
-## License
-ISC (Feel free to adapt.)
-
----
-Generated as part of repository recovery & cleanup after resolving merge conflicts.
-

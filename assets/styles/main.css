@@ -2119,3 +2119,9 @@ body {
 
 /* Smooth animation on resize */
 .chess-board { transition: width 0.15s ease, height 0.15s ease; }
+
+/* Responsive: hide manual resize handle and tighten padding on narrow screens */
+@media (max-width: 900px) {
+    .board-resize-handle { display: none !important; }
+    .board-wrapper { padding: var(--space-md); }
+}

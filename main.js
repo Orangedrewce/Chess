@@ -558,6 +558,12 @@ function attemptPremoveExecution() {
  */
 function processMove(move) {
     try {
+        // Any successfully processed move invalidates any queued premove.
+        // (If it was a premove being executed, it was already cleared; this is an extra safety net.)
+        if (gameState.premove) {
+            gameState.premove = null;
+            clearPremoveUI();
+        }
         gameState.lastMove = move;
 
         logger.debug('Processing move', move);
@@ -786,6 +792,22 @@ function renderBoard() {
             clearHighlights();
         }
     }
+
+    // Keep (or remove) premove arrow in sync. If a premove is queued while waiting for opponent,
+    // re-render it so coordinates stay correct after any board render (resize, orientation flip, move).
+    // If it's now our turn (premove should have executed or been cleared), ensure UI arrow is removed.
+    if (gameState.premove) {
+        if (chess.turn() !== gameState.settings.playerColor && !gameState.isGameOver) {
+            renderPremoveUI(gameState.premove); // safely clears & redraws
+        } else {
+            // It's our turn or game ended – premove no longer relevant
+            gameState.premove = null;
+            clearPremoveUI();
+        }
+    } else {
+        // Defensive: if no premove in state but an orphan arrow remains, remove it.
+        clearPremoveUI();
+    }
 }
 
 function updateStatus() {
@@ -869,6 +891,7 @@ function addMoveToHistory(move) {
 // ============================================================================
 let draggedPiece = null;
 let sourceSquare = null;
+let dragMoveApplied = false; // tracks if a legal move occurred during current drag
 
 function handleDragStart(event) {
     const sq = event.target.closest('.square');
@@ -876,6 +899,7 @@ function handleDragStart(event) {
     if (!gameState.isStarted || gameState.isGameOver) return; // Prevent drag before game starts or after over
     sourceSquare = sq.dataset.square;
     draggedPiece = event.target;
+    dragMoveApplied = false;
     
     try {
         event.dataTransfer.setData('text/plain', sourceSquare);
@@ -886,8 +910,12 @@ function handleDragStart(event) {
     const pieceToDrag = draggedPiece;
 
     const onDragEnd = () => {
-        const srcEl = document.querySelector(`[data-square="${sourceSquare}"]`);
+        const srcEl = sourceSquare ? document.querySelector(`[data-square="${sourceSquare}"]`) : null;
         if (srcEl) srcEl.classList.remove('drag-source');
+        if (!dragMoveApplied) {
+            // No legal move happened -> snap back by re-rendering board state
+            try { renderBoard(); } catch(_) {}
+        }
         if (pieceToDrag) {
             pieceToDrag.style.display = 'block';
             pieceToDrag.removeEventListener('dragend', onDragEnd);
@@ -915,7 +943,8 @@ function handleDrop(event) {
     
     const targetSquareElement = event.target.closest('.square');
     if (!targetSquareElement) {
-        renderBoard(); // Restore piece if dropped outside
+        // Dropped outside board – just restore
+        renderBoard();
         return;
     }
     const toSquare = targetSquareElement.dataset.square;
@@ -930,9 +959,20 @@ function handleDrop(event) {
 
     // Simulate clicks to reuse existing logic only if destination differs
     if (sourceSquare) {
+        const preFen = chess.fen();
         try { handleSquareClick(sourceSquare); } catch (e) { logger.error('Error during drag drop (source click)', e); }
         if (toSquare) {
             try { handleSquareClick(toSquare); } catch (e) { logger.error('Error during drag drop (target click)', e); }
+        }
+        const postFen = chess.fen();
+        dragMoveApplied = preFen !== postFen; // board position changed means move executed
+        if (!dragMoveApplied) {
+            // Provide quick invalid animation feedback
+            const targetEl = document.querySelector(`[data-square="${toSquare}"]`);
+            if (targetEl) {
+                targetEl.classList.add('invalid-drop');
+                setTimeout(() => targetEl.classList.remove('invalid-drop'), 300);
+            }
         }
     }
     document.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
@@ -1287,23 +1327,48 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Board Resizing Logic ---
     const handle = document.querySelector('.board-resize-handle');
     const root = document.documentElement;
-    const getCurrentSquareSize = () => parseInt(getComputedStyle(root).getPropertyValue('--square-size')); // may yield computed px
+    const getCurrentSquareSize = () => parseInt(getComputedStyle(root).getPropertyValue('--square-size'));
+    const MOBILE_BREAK = 900; // px
+    const DEFAULT_DESKTOP_SIZE = 60;
+    function isMobileViewport() { return window.innerWidth <= MOBILE_BREAK; }
+    function computeMobileSquareSize() {
+        const available = Math.max(240, window.innerWidth - 40 - 48); // subtract side padding + coord gutters
+        const sq = Math.floor(available / 8);
+        return Math.max(34, Math.min(70, sq));
+    }
+    function applyResponsiveSize() {
+        if (isMobileViewport()) {
+            const size = computeMobileSquareSize();
+            root.style.setProperty('--square-size', size + 'px');
+            try { renderBoard(); } catch(_) {}
+            if (handle) handle.style.display = 'none';
+            return true;
+        } else if (handle) {
+            handle.style.display = '';
+        }
+        return false;
+    }
     let resizing = false;
     let startX = 0, startY = 0, startSize = 0;
     const MIN_SIZE = 40; // px per square
     const MAX_SIZE = 110; // px per square
     const persistKey = 'chess.squareSize';
-    // Load persisted size
-    try {
-        const saved = localStorage.getItem(persistKey);
-        if (saved) {
-            root.style.setProperty('--square-size', saved + 'px');
-            // Re-render board if already built
-            try { renderBoard(); } catch(_){}
-        }
-    } catch(_) {}
+    // Initial sizing (mobile overrides persistence)
+    if (!applyResponsiveSize()) {
+        try {
+            const saved = localStorage.getItem(persistKey);
+            if (saved) {
+                root.style.setProperty('--square-size', saved + 'px');
+                try { renderBoard(); } catch(_) {}
+            } else {
+                root.style.setProperty('--square-size', DEFAULT_DESKTOP_SIZE + 'px');
+            }
+        } catch(_) {}
+    }
+    window.addEventListener('resize', () => { applyResponsiveSize(); });
 
     function applySize(newSize) {
+        if (isMobileViewport()) return; // ignore manual resize on mobile
         const clamped = Math.min(MAX_SIZE, Math.max(MIN_SIZE, newSize));
         root.style.setProperty('--square-size', clamped + 'px');
         try { renderBoard(); } catch(_) {}
@@ -1312,6 +1377,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (handle) {
         handle.addEventListener('mousedown', (e) => {
+            if (isMobileViewport()) return; // disabled on mobile
             e.preventDefault();
             resizing = true;
             startX = e.clientX; startY = e.clientY;
@@ -1320,9 +1386,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         window.addEventListener('mousemove', (e) => {
             if (!resizing) return;
-            const dx = e.clientX - startX; // horizontal drag influences size
-            const dy = e.clientY - startY; // allow combined direction; average for smoother feel
-            const delta = (dx + (-dy)) / 4; // up or right increases
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            const delta = (dx + (-dy)) / 4;
             applySize(startSize + delta);
         });
         window.addEventListener('mouseup', () => { if (resizing) { resizing = false; document.body.classList.remove('resizing-board'); }});

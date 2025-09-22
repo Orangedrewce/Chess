@@ -919,11 +919,21 @@ function handleDrop(event) {
         return;
     }
     const toSquare = targetSquareElement.dataset.square;
-    
-    // Simulate clicks to reuse existing logic
+    // If dropped back onto original square, just re-render and exit (no move)
+    if (sourceSquare && toSquare === sourceSquare) {
+        renderBoard();
+        sourceSquare = null;
+        draggedPiece = null;
+        document.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+        return;
+    }
+
+    // Simulate clicks to reuse existing logic only if destination differs
     if (sourceSquare) {
         try { handleSquareClick(sourceSquare); } catch (e) { logger.error('Error during drag drop (source click)', e); }
-        try { handleSquareClick(toSquare); } catch (e) { logger.error('Error during drag drop (target click)', e); }
+        if (toSquare) {
+            try { handleSquareClick(toSquare); } catch (e) { logger.error('Error during drag drop (target click)', e); }
+        }
     }
     document.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
 }

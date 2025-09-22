@@ -756,22 +756,22 @@ function renderBoard() {
             if (piece) {
                 const pieceSpan = document.createElement('span');
                 pieceSpan.className = `piece ${piece.color === 'w' ? 'white' : 'black'}`;
+                pieceSpan.dataset.type = piece.type;
+                pieceSpan.dataset.color = piece.color;
                 const sym = getPieceSymbol(piece);
                 pieceSpan.textContent = sym;
-                pieceSpan.dataset.symbol = sym; // store for recovery if DOM text lost
-                
+                pieceSpan.dataset.symbol = sym;
+
                 if (gameState.isStarted && !gameState.isGameOver && piece.color === gameState.settings.playerColor) {
                     pieceSpan.draggable = true;
                     pieceSpan.addEventListener('dragstart', handleDragStart);
                 }
                 squareDiv.appendChild(pieceSpan);
-                // Defensive: if glyph fails to render (e.g., font load race) schedule a microtask to re-set
                 queueMicrotask(() => {
                     if (pieceSpan && !pieceSpan.textContent) {
                         pieceSpan.textContent = pieceSpan.dataset.symbol || sym;
                     }
                 });
-
                 if (isCheck && piece.type === 'k' && piece.color === chess.turn()) {
                     squareDiv.classList.add('in-check');
                 }
@@ -1089,8 +1089,10 @@ function highlightMoves(square) {
 
 function getPieceSymbol(piece) {
     if (!piece || !piece.type) return '?';
-    const symbols = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
-    return symbols[piece.type.toLowerCase()] || '?';
+    const white = { p: '♙', r: '♖', n: '♘', b: '♗', q: '♕', k: '♔' };
+    const black = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
+    const map = piece.color === 'w' ? white : black;
+    return map[piece.type.toLowerCase()] || '?';
 }
 
 function renderPremoveUI(premove) {

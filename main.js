@@ -91,8 +91,9 @@ const AI_PERSONALITIES = {
         timeMs: 3200,       // Generous move time
         thinkTime: { min: 700, max: 1700 },
         blunderChance: 0.0,
-        notes: 'As strong as feasible within browser constraints.'
-    }
+        timeManagement: 'adaptive',
+        notes: 'As strong as feasible within browser constraints. Adapts to clocks.'
+    },
 };
 
 function getPersonality(key) {
@@ -136,71 +137,63 @@ const uiElements = {
 // GAME INITIALIZATION & RESET
 // ============================================================================
 
-function setupNewGame() {
+async function setupNewGame() {
     try {
         logger.info('Initializing new game');
-    const opponent = uiElements.opponentSelect.value;
-    const timeControl = uiElements.timeControlSelect.value;
-    const playerColor = uiElements.playWhiteButton.classList.contains('selected') ? 'w' : 'b';
+        const opponent = uiElements.opponentSelect.value;
+        const timeControl = uiElements.timeControlSelect.value;
+        const playerColor = uiElements.playWhiteButton.classList.contains('selected') ? 'w' : 'b';
 
-    gameState.settings = { opponent, timeControl, playerColor };
-    gameState.isBoardFlipped = (gameState.settings.playerColor === 'b');
-    gameState.isStarted = true;
+        gameState.settings = { opponent, timeControl, playerColor };
+        gameState.isBoardFlipped = (gameState.settings.playerColor === 'b');
+        gameState.isStarted = true;
 
+        uiElements.setupCard.style.display = 'none';
+        uiElements.playerInfoCard.style.display = 'flex';
+        uiElements.moveHistoryCard.style.display = 'flex';
+        uiElements.gameControls.style.display = 'grid';
+        uiElements.board.classList.remove('inactive');
 
-    uiElements.setupCard.style.display = 'none';
-    uiElements.playerInfoCard.style.display = 'flex';
-    uiElements.moveHistoryCard.style.display = 'flex';
-    uiElements.gameControls.style.display = 'grid';
-    uiElements.board.classList.remove('inactive');
+        logger.debug('Settings', gameState.settings);
 
-    logger.debug('Settings', gameState.settings);
+        setupClocks();
+        updatePlayerInfo();
+        renderBoard();
+        updateStatus();
 
-    setupClocks();
-    updatePlayerInfo();
-    renderBoard();
-    updateStatus();
-
-    // Apply default strength preset if opponent is AI and no explicit custom modifications made.
-    if (gameState.settings.opponent !== 'human') {
-        const oppKey = gameState.settings.opponent;
-        const personality = getPersonality(oppKey);
-        gameState.ai.personality = personality;
-        // Maintain backward compatibility for existing logging/structures
-        if (personality.type === 'engine') {
-            gameState.ai.config = { timeMs: personality.timeMs, maxDepth: personality.depth, level: personality.id };
-        } else {
-            gameState.ai.config = { level: personality.id };
-        }
-        logger.info(`[AI] Personality set: ${personality.id}`, personality);
-
-        if (personality.type === 'engine') {
-            // Lazy init engine
-            if (!gameState.ai.engine) {
-                try {
-                    // Let ChessAI determine correct path (GitHub Pages base aware)
-                    gameState.ai.engine = new ChessAI();
-                    logger.info('[AI] Stockfish engine worker initializing...');
-                    gameState.ai.engine.readyPromise.then(() => {
+        // Apply default strength preset if opponent is AI
+        if (gameState.settings.opponent !== 'human') {
+            const oppKey = gameState.settings.opponent;
+            const personality = getPersonality(oppKey);
+            gameState.ai.personality = personality;
+            if (personality.type === 'engine') {
+                gameState.ai.config = { timeMs: personality.timeMs, maxDepth: personality.depth, level: personality.id };
+            } else {
+                gameState.ai.config = { level: personality.id };
+            }
+            logger.info(`[AI] Personality set: ${personality.id}`, personality);
+            if (personality.type === 'engine') {
+                if (!gameState.ai.engine) {
+                    try {
+                        gameState.ai.engine = new ChessAI();
+                        logger.info('[AI] Stockfish engine worker initializing...');
+                        await gameState.ai.engine.readyPromise;
                         logger.info('[AI] Stockfish engine is ready.');
-                        if (chess.turn() !== gameState.settings.playerColor) {
-                            makeAIMove();
-                        }
-                    });
-                } catch (e) {
-                    logger.error('[AI] Engine init failed – fallback random', e);
-                    gameState.ai.personality = getPersonality('monkey');
+                    } catch (e) {
+                        logger.error('[AI] Engine init failed – fallback random', e);
+                        gameState.ai.personality = getPersonality('monkey');
+                    }
+                } else {
+                    // Engine already exists; ensure prior readiness has completed
+                    try { await gameState.ai.engine.readyPromise; } catch(_) {}
                 }
-            } else if (chess.turn() !== gameState.settings.playerColor) {
-                makeAIMove();
             }
-        } else {
-            // Random personality may need to move immediately if it's its turn
+
+            // After ensuring engine readiness (if needed), if it's AI's turn, make a move
             if (chess.turn() !== gameState.settings.playerColor) {
-                makeAIMove();
+                try { await makeAIMove(); } catch(e) { logger.error('[AI] makeAIMove failed post-setup', e); }
             }
         }
-    }
     } catch (err) {
         logger.error('Failed to setup new game', err);
     }
@@ -256,7 +249,7 @@ function resetGame() {
 // ============================================================================
 
 // --- Game Setup ---
-uiElements.startGameButton.addEventListener('click', () => {
+uiElements.startGameButton.addEventListener('click', async () => {
     try {
         const opponentVal = uiElements.opponentSelect?.value;
         const timeVal = uiElements.timeControlSelect?.value;
@@ -274,7 +267,7 @@ uiElements.startGameButton.addEventListener('click', () => {
             uiElements.statusText.classList.add('warn');
             return;
         }
-        setupNewGame();
+        await setupNewGame();
     } catch (e) { logger.error('startGame click handler', e); }
 });
 uiElements.newGameButton.addEventListener('click', () => {
@@ -524,6 +517,13 @@ function attemptPremoveExecution() {
         // Auto-promote to queen for premoves
         const moveObject = { ...gameState.premove };
         const piece = chess.get(moveObject.from);
+        if (!piece) {
+            // Piece no longer exists (captured or moved) – invalidate premove
+            logger.warn('PREMOVE invalidated: original piece no longer on from square', moveObject);
+            gameState.premove = null;
+            clearPremoveUI();
+            return;
+        }
         if (piece && piece.type === 'p') {
             const promotionRank = piece.color === 'w' ? '8' : '1';
             if (moveObject.to.endsWith(promotionRank)) {
@@ -531,9 +531,10 @@ function attemptPremoveExecution() {
             }
         }
 
-        const moveResult = chess.move(moveObject);
-        gameState.premove = null; // Clear premove regardless of success
-        clearPremoveUI();
+    const moveResult = chess.move(moveObject);
+    // Clear premove regardless of success (it was our turn now)
+    gameState.premove = null;
+    clearPremoveUI();
 
         if (moveResult) {
             logger.info('PREMOVE executed', moveResult);
@@ -558,11 +559,14 @@ function attemptPremoveExecution() {
  */
 function processMove(move) {
     try {
-        // Any successfully processed move invalidates any queued premove.
-        // (If it was a premove being executed, it was already cleared; this is an extra safety net.)
-        if (gameState.premove) {
+        // Only clear premove automatically if this move belongs to the same side that queued it (player side).
+        if (gameState.premove && move.color === gameState.settings.playerColor) {
+            logger.trace('Clearing premove (our move processed)');
             gameState.premove = null;
             clearPremoveUI();
+        } else if (gameState.premove && move.color !== gameState.settings.playerColor) {
+            // Retain premove; it may execute next.
+            logger.trace('Retaining premove after opponent move', gameState.premove);
         }
         gameState.lastMove = move;
 
@@ -587,6 +591,29 @@ function processMove(move) {
 // ============================================================================
 // AI LOGIC
 // ============================================================================
+
+// Time control classification helper
+function detectTimeControlType() {
+    const totalBase = (gameState.timers.whiteStartSeconds || 0) + (gameState.timers.blackStartSeconds || 0);
+    if (!isFinite(totalBase) || totalBase === 0) return 'untimed';
+    const perSide = totalBase / 2;
+    if (perSide <= 180) return 'bullet';
+    if (perSide <= 600) return 'blitz';
+    if (perSide <= 1500) return 'rapid';
+    return 'classical';
+}
+
+// Emergency search parameter override when very low on time
+function handleTimeEmergency(color, timeLeftMs) {
+    if (timeLeftMs < 2000) {
+        return {
+            time: Math.max(50, timeLeftMs - 100),
+            maxDepth: 6,
+            emergency: true
+        };
+    }
+    return null;
+}
 
 /**
  * IMPLEMENTED: A simple AI that makes a random legal move.
@@ -622,6 +649,8 @@ async function makeAIMove() {
             if (moveObj) {
                 logger.info('[AI][random] Move played', { san: moveObj.san, delayMs: thinkDelay });
                 processMove(moveObj);
+                // Attempt premove execution immediately if queued
+                attemptPremoveExecution();
             }
             return;
         }
@@ -639,13 +668,58 @@ async function makeAIMove() {
                 if (gameState.isGameOver) return;
                 const mv = legalMoves[Math.floor(Math.random() * legalMoves.length)];
                 const moveObj = chess.move({ from: mv.from, to: mv.to, promotion: mv.promotion });
-                if (moveObj) { logger.warn('[AI] Fallback random move (engine init failure)', moveObj.san); processMove(moveObj); }
+                if (moveObj) { 
+                    logger.warn('[AI] Fallback random move (engine init failure)', moveObj.san); 
+                    processMove(moveObj);
+                    attemptPremoveExecution();
+                }
                 return;
             }
         }
 
-        const fen = chess.fen();
-        const searchOpts = { maxDepth: personality.depth, time: personality.timeMs };
+    const fen = chess.fen();
+    // Dynamic timing inputs derived from actual selected control value (e.g. '10+0', '15+10')
+    const moveNumber = Math.floor(chess.history().length / 2) + 1;
+    const whiteTimeMs = isFinite(gameState.timers.whiteTime) ? gameState.timers.whiteTime * 1000 : Infinity;
+    const blackTimeMs = isFinite(gameState.timers.blackTime) ? gameState.timers.blackTime * 1000 : Infinity;
+    const incrementMs = (gameState.timers.incrementSeconds || 0) * 1000;
+    const timeControlValue = gameState.settings.timeControl; // raw select value like '5+0'
+    const timeControlType = detectTimeControlType(); // categorized label (bullet/blitz/...)
+
+        let searchOpts = { maxDepth: personality.depth, time: personality.timeMs };
+        if (personality.type === 'engine') {
+            // Base dynamic options passed to ChessAI (it will refine internally)
+            searchOpts = {
+                maxDepth: personality.depth,
+                time: personality.timeMs,
+                whiteTime: whiteTimeMs,
+                blackTime: blackTimeMs,
+                increment: incrementMs,
+                color: chess.turn(),
+                moveNumber,
+                timeControl: timeControlValue,  // pass the actual selected control string
+                timeCategory: timeControlType   // additional classification if engine/UI wants it
+            };
+
+            // Bullet quick mode override
+            const isBulletTC = timeControlType === 'bullet' || whiteTimeMs < 60000 || blackTimeMs < 60000;
+            if (isBulletTC) {
+                const sideTimeLeft = chess.turn() === 'w' ? whiteTimeMs : blackTimeMs;
+                const quickTime = Math.min(500, Math.max(100, sideTimeLeft / 20));
+                searchOpts.time = quickTime;
+                searchOpts.maxDepth = Math.min(searchOpts.maxDepth, 10);
+            }
+
+            // Emergency override (pre-empt internal one for logging clarity here)
+            const sideTimeLeft = chess.turn() === 'w' ? whiteTimeMs : blackTimeMs;
+            const emergency = handleTimeEmergency(chess.turn(), sideTimeLeft);
+            if (emergency) {
+                searchOpts.time = emergency.time;
+                searchOpts.maxDepth = emergency.maxDepth;
+                searchOpts.emergency = true;
+            }
+            logger.debug('[AI] Time control params', searchOpts);
+        }
         const tStart = performance.now();
         let aiResult; let firstError = null;
         const searchPromise = (async () => {
@@ -655,7 +729,7 @@ async function makeAIMove() {
                 firstError = engineErr;
                 logger.warn('[AI] Primary search failed – retrying reduced depth', { err: engineErr.message });
                 try {
-                    aiResult = await gameState.ai.engine.getMove(fen, { maxDepth: Math.max(2, Math.floor((personality.depth || 4)/2)), time: Math.min((personality.timeMs||1000)*1.3, (personality.timeMs||1000)+500) });
+                    aiResult = await gameState.ai.engine.getMove(fen, { maxDepth: Math.max(2, Math.floor((personality.depth || 4)/2)), time: Math.min((personality.timeMs||1000)*1.3, (personality.timeMs||1000)+500), color: chess.turn(), whiteTime: whiteTimeMs, blackTime: blackTimeMs, increment: incrementMs, moveNumber });
                 } catch (retryErr) {
                     logger.error('[AI] Retry failed – using random', { retryErr: retryErr.message, firstError: firstError?.message });
                     const mv = legalMoves[Math.floor(Math.random() * legalMoves.length)];
@@ -663,7 +737,10 @@ async function makeAIMove() {
                     aiResult = { move: uci };
                 }
             }
-        })();
+        })().catch(err => {
+            // Defensive catch to avoid unhandled rejection (should be handled above)
+            logger.error('[AI] searchPromise unhandled rejection', err);
+        });
 
         // Wait for both artificial delay and (at least) one completed search attempt
         await Promise.all([delayPromise, searchPromise]);
@@ -693,6 +770,7 @@ async function makeAIMove() {
             const dt = (performance.now() - tStart).toFixed(0);
             logger.info('[AI] Move played', { san: moveObj.san, uci: chosenMoveUci, timeMs: dt, thinkDelay });
             processMove(moveObj);
+            attemptPremoveExecution();
         } else {
             logger.warn('[AI] Move became illegal before execution', { uci: chosenMoveUci });
         }
@@ -704,7 +782,7 @@ async function makeAIMove() {
         renderBoard();
         updateClockDisplay();
         updateStatus();
-        attemptPremoveExecution();
+        // attemptPremoveExecution already called in success paths; calling again here is safe but redundant.
     }
 }
 
@@ -846,18 +924,22 @@ function updateStatus() {
 }
 
 function updatePlayerInfo() {
-    const turn = chess.turn();
-    uiElements.whitePlayerCard.classList.toggle('active', turn === 'w');
-    uiElements.blackPlayerCard.classList.toggle('active', turn === 'b');
-    
-    if (gameState.settings.timeControl !== "0+0" && !gameState.isGameOver) {
-        if (turn === 'w') {
-            startTimer('w');
-            stopTimer('b');
-        } else {
-            startTimer('b');
-            stopTimer('w');
+    try {
+        const turn = chess.turn();
+        uiElements.whitePlayerCard.classList.toggle('active', turn === 'w');
+        uiElements.blackPlayerCard.classList.toggle('active', turn === 'b');
+        
+        if (gameState.settings.timeControl !== "0+0" && !gameState.isGameOver) {
+            if (turn === 'w') {
+                startTimer('w');
+                stopTimer('b');
+            } else {
+                startTimer('b');
+                stopTimer('w');
+            }
         }
+    } catch (err) {
+        logger.error('Error in updatePlayerInfo', err);
     }
 }
 
@@ -1003,26 +1085,32 @@ function setupClocks() {
 }
 
 function startTimer(color) {
+    // Do not start timers if game over
+    if (gameState.isGameOver) return;
     if (color === 'w' && !gameState.timers.white) {
         gameState.timers.white = setInterval(() => {
-            gameState.timers.whiteTime--;
+            if (gameState.isGameOver) { stopTimer('w'); return; }
+            gameState.timers.whiteTime = Math.max(0, gameState.timers.whiteTime - 1);
             updateClockDisplay();
             if (gameState.timers.whiteTime <= 0) {
                 gameState.isGameOver = true;
                 uiElements.statusText.textContent = "Time's up! Black wins.";
                 uiElements.statusText.classList.add('game-over');
                 stopTimer('w'); stopTimer('b');
+                cancelPendingAI();
             }
         }, 1000);
     } else if (color === 'b' && !gameState.timers.black) {
         gameState.timers.black = setInterval(() => {
-            gameState.timers.blackTime--;
+            if (gameState.isGameOver) { stopTimer('b'); return; }
+            gameState.timers.blackTime = Math.max(0, gameState.timers.blackTime - 1);
             updateClockDisplay();
             if (gameState.timers.blackTime <= 0) {
                 gameState.isGameOver = true;
                 uiElements.statusText.textContent = "Time's up! White wins.";
                 uiElements.statusText.classList.add('game-over');
                 stopTimer('w'); stopTimer('b');
+                cancelPendingAI();
             }
         }, 1000);
     }
